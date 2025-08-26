@@ -10,6 +10,23 @@ This section explores the core algorithms that power Dremio's data lakehouse pla
 
 ### 1. Cost-Based Query Optimizer (CBO)
 
+**Mathematical Foundation and Why This Approach:**
+
+The Cost-Based Query Optimizer (CBO) is fundamental to Dremio's performance because it solves the **query plan selection problem** - choosing the optimal execution plan from an exponentially large search space.
+
+**The Mathematical Challenge:**
+Given n relations R₁, R₂, ..., Rₙ with join predicates, the number of possible execution plans grows as:
+- Left-deep trees: (n-1)! possible join orders
+- Bushy trees: (2n-2)! / 2^(n-1) possible plans
+- For n=10 tables: ~3.6 million possible plans
+
+**Why CBO is Essential:**
+1. **Optimal Substructure Property**: The optimal plan for joining relations {R₁, R₂, ..., Rₖ} contains optimal subplans for subsets of these relations
+2. **Cost Additivity**: Total query cost can be modeled as the sum of individual operation costs: C(plan) = Σᵢ C(opᵢ)
+3. **Statistical Foundation**: Cost estimation relies on statistical models that provide expected values with bounded error
+
+**Algorithm Complexity:** O(3ⁿ) using dynamic programming vs O((2n-2)!) for exhaustive search
+
 The heart of Dremio's query processing engine uses sophisticated cost estimation algorithms:
 
 #### Selinger-Style Join Ordering
@@ -63,6 +80,26 @@ class QueryOptimizer:
 ```
 
 #### Cardinality Estimation Algorithm
+
+**Mathematical Foundation and Why This Approach:**
+
+Cardinality estimation is critical for optimal query planning because **join cost is proportional to cardinality**: C_join = O(|R| × |S| × selectivity). Accurate cardinality estimates determine the difference between plans that execute in seconds versus hours.
+
+**The Statistical Challenge:**
+Estimate |σ_θ(R)| and |R ⋈_θ S| without executing operations, using limited statistical information.
+
+**Key Mathematical Principles:**
+1. **Independence Assumption**: For predicates P₁, P₂: sel(P₁ ∧ P₂) ≈ sel(P₁) × sel(P₂)
+2. **Uniform Distribution Assumption**: Values within histogram bins are uniformly distributed
+3. **Join Selectivity Formula**: sel(R.A = S.B) ≈ 1/max(distinct(R.A), distinct(S.B))
+
+**Why Histogram-Based Approach:**
+- **Space-Time Trade-off**: O(k) space for k bins provides O(1) selectivity estimation
+- **Accuracy Bounds**: For well-distributed data, error decreases as O(1/√k)
+- **Adaptive Binning**: Equal-frequency binning handles skewed data better than equal-width
+
+**Algorithm Complexity:** O(1) for selectivity queries after O(n log n) histogram construction
+
 ```python
 class CardinalityEstimator:
     def __init__(self):
@@ -110,6 +147,29 @@ class CardinalityEstimator:
 ```
 
 ### 2. Predicate Pushdown Algorithm
+
+**Mathematical Foundation and Why This Approach:**
+
+Predicate pushdown is a critical optimization that dramatically reduces data movement and processing costs by applying filters as early as possible in the execution pipeline.
+
+**The Optimization Problem:**
+Given a query tree with predicates at various levels, find the optimal placement that minimizes total execution cost:
+C_total = C_scan + C_transfer + C_process
+
+**Mathematical Benefits:**
+1. **Data Reduction**: If selectivity σ < 1, pushing predicate reduces subsequent operation costs by factor σ
+2. **Network Cost Reduction**: C_network = bandwidth × |data_transferred|. Early filtering reduces |data_transferred| by σ
+3. **Memory Footprint**: Working set size reduced from |R| to σ × |R|
+4. **Join Cost Reduction**: Join cost O(|R| × |S|) becomes O(σ_R × |R| × σ_S × |S|)
+
+**Why Tree-Based Pushdown:**
+- **Systematic Coverage**: Tree traversal ensures all optimization opportunities are considered
+- **Correctness Preservation**: Maintains query semantics through careful predicate dependency analysis
+- **Optimal Placement**: Each predicate is pushed to the lowest valid level in the execution tree
+
+**Algorithm Complexity:** O(n × p) where n = tree nodes, p = predicates per node
+
+**Performance Impact:** Can achieve 10-100x performance improvement for selective queries
 
 Optimizes queries by pushing predicates closer to data sources:
 
@@ -206,7 +266,38 @@ class PredicatePushdown:
 
 ## Reflection Management Algorithms
 
+**Mathematical Foundation and Why Reflection Management is Critical:**
+
+Reflections are materialized views that trade storage space for query performance. The fundamental optimization problem is the **materialized view selection problem**: Given limited storage S and a query workload Q, select views V that maximize performance benefit while respecting storage constraints.
+
+**The Multi-Objective Optimization Problem:**
+- **Maximize**: Σ_q∈Q freq(q) × speedup(q, V) (total query acceleration)
+- **Subject to**: Σ_v∈V size(v) ≤ S (storage constraint)
+- **Minimize**: Σ_v∈V maintenance_cost(v) (update overhead)
+
+This is a variant of the **Multi-Dimensional Knapsack Problem**, which is NP-complete, requiring sophisticated heuristics.
+
 ### 1. Intelligent Reflection Recommendation
+
+**Mathematical Foundation and Why This Approach:**
+
+The recommendation engine solves a **constrained optimization problem** to select the optimal set of reflections that maximize query performance under resource constraints.
+
+**Key Mathematical Components:**
+1. **ROI Calculation**: ROI(reflection) = (Benefit - Cost) / Cost
+   - Benefit = Σ_queries freq(q) × acceleration(q, reflection)  
+   - Cost = creation_cost + maintenance_cost + storage_cost
+
+2. **Query Pattern Analysis**: Uses **frequency analysis** and **clustering algorithms** to identify common access patterns
+   - Time Complexity: O(q log q) for pattern extraction from q queries
+   - Space Complexity: O(k) where k is the number of distinct patterns
+
+3. **Greedy Selection with Constraints**: Approximation algorithm that achieves (1-1/e) optimality ratio for submodular benefit functions
+
+**Why This Algorithm Works:**
+- **Submodular Property**: Benefit function exhibits diminishing returns - each additional reflection provides less marginal benefit
+- **Greedy Optimality**: For submodular functions under cardinality constraints, greedy selection achieves provable approximation bounds
+- **Scalability**: O(n² log n) complexity for n reflection candidates vs O(2ⁿ) for exhaustive search
 
 ```python
 class ReflectionRecommendationEngine:
@@ -491,6 +582,28 @@ class WorkDistributionManager:
 
 ### 2. Fault Tolerance Algorithm
 
+**Mathematical Foundation and Why Fault Tolerance is Critical:**
+
+Distributed query processing faces the fundamental challenge of **maintaining system availability** in the presence of component failures. The mathematical framework is based on **reliability theory** and **failure probability models**.
+
+**Key Mathematical Models:**
+1. **System Reliability**: R_system(t) = P(system operational at time t)
+2. **MTBF (Mean Time Between Failures)**: E[T_failure] for exponential failure distribution
+3. **Recovery Time Optimization**: Minimize E[T_recovery] subject to resource constraints
+
+**The Fault Tolerance Problem:**
+Given failure rate λ and n distributed components, the probability of at least one failure in time t is:
+P(failure) = 1 - e^(-nλt)
+
+For large distributed systems, this approaches 1, making fault tolerance essential rather than optional.
+
+**Why Checkpoint-Based Recovery:**
+- **Mathematical Optimality**: Checkpoint interval T* = √(2C_checkpoint/λ) minimizes total overhead
+- **Recovery Cost Reduction**: From O(T_total) without checkpoints to O(T_checkpoint)
+- **Availability Improvement**: Reduces MTTR (Mean Time To Repair) by orders of magnitude
+
+**Algorithm Complexity:** O(log n) for failure detection, O(k) for recovery of k affected fragments
+
 ```python
 class FaultToleranceManager:
     def __init__(self):
@@ -539,7 +652,33 @@ class FaultToleranceManager:
 
 ## Performance Optimization Algorithms
 
+**Mathematical Foundation and Why Performance Optimization is Critical:**
+
+Performance optimization in distributed systems requires solving multiple interconnected **resource allocation problems** under real-time constraints. The mathematical challenge is optimizing system throughput while maintaining stability and fairness.
+
 ### 1. Memory Management Algorithm
+
+**Mathematical Foundation and Why Memory Management is Critical:**
+
+Memory management in distributed query processing is a **constrained resource allocation problem** that directly impacts system performance and stability. Poor memory allocation can lead to thrashing, OOM kills, and exponential performance degradation.
+
+**The Optimization Problem:**
+Given total memory M and n concurrent operations, find allocation A = [a₁, a₂, ..., aₙ] that:
+- **Maximizes**: Σᵢ utility(aᵢ) (total system throughput)
+- **Subject to**: Σᵢ aᵢ ≤ M (memory constraint)
+- **Constraint**: aᵢ ≥ min_memory(opᵢ) (minimum viable allocation)
+
+**Mathematical Models:**
+1. **Memory Pool Partitioning**: Uses **reservoir sampling** theory for fair allocation
+2. **LRU Eviction**: Based on **temporal locality principle** - P(access | recent_access) > P(access | no_recent_access)
+3. **Working Set Theory**: Memory requirement follows **power-law distribution** - most operations need little memory, few need much
+
+**Why LRU Algorithm:**
+- **Optimal for Stack Distance**: Minimizes fault rate for programs with temporal locality
+- **Mathematical Proof**: LRU is optimal among all algorithms that don't use future information
+- **Complexity**: O(1) access time with proper data structures (doubly-linked list + hash map)
+
+**Performance Impact:** Proper memory management can improve query performance by 2-10x and prevent system instability.
 
 ```python
 class MemoryManager:
